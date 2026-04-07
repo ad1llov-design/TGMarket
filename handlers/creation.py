@@ -152,16 +152,22 @@ async def format_post(data: dict, seller_link: str, bot_username: str) -> str:
 async def publish_ad_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data()
     
-    # Channel mapping
-    CHANNEL_IDS = {
-        "phones": "@test_phones_channel",
-        "cars": "@test_cars_channel",
-        "realty": "@test_realty_channel",
-        "other": "@test_other_channel"
-    }
-    channel_id = CHANNEL_IDS.get(data['category'])
+    from database.client import supabase
     
+    # Fetch channel from Supabase
+    try:
+        response = supabase.table('channels').select('channel_id').eq('category', data['category']).execute()
+        if response.data:
+            channel_id = response.data[0]['channel_id']
+        else:
+            await callback.answer("Ошибка: Канал для этой категории не найден в базе данных.", show_alert=True)
+            return
+    except Exception as e:
+        await callback.answer(f"Ошибка БД: {str(e)}", show_alert=True)
+        return
+        
     user = callback.from_user
+
     seller_link = f"tg://user?id={user.id}"
     if user.username:
         seller_link = f"https://t.me/{user.username}"
@@ -183,7 +189,24 @@ async def publish_ad_handler(callback: types.CallbackQuery, state: FSMContext, b
             parse_mode="HTML"
         )
         await callback.answer("Объявление успешно опубликовано!", show_alert=True)
+        
+        # Save to DB
+        try:
+            supabase.table('listings').insert({
+                "user_id": user.id,
+                "category": data['category'],
+                "region": data['region'],
+                "title": data['title'],
+                "description": data['description'],
+                "price": data['price'],
+                "contact": data['contact'],
+                "photos": data['photos']
+            }).execute()
+        except Exception as e:
+            print(f"Failed to save listing to DB: {e}")
+            
         await state.clear()
+
         
     except Exception as e:
         await callback.answer(f"Ошибка при публикации: {str(e)}", show_alert=True)

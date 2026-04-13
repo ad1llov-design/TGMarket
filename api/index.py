@@ -12,17 +12,15 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
-# Try importing config, handle error for better Vercel logs
+# Try importing everything and catch all errors
 try:
     from config import config
-except ImportError as e:
-    logging.error(f"Failed to import config: {e}")
-    config = None
-
-try:
     from handlers import common, creation
-except ImportError as e:
-    logging.error(f"Failed to import handlers: {e}")
+    STARTUP_ERROR = None
+except Exception as e:
+    import traceback
+    STARTUP_ERROR = f"Startup Error: {str(e)}\n{traceback.format_exc()}"
+    config = None
     common = None
     creation = None
 
@@ -30,30 +28,40 @@ app = FastAPI()
 
 @app.get("/")
 async def root():
-    if not config:
-        return {"error": "Config not loaded. Check Environment Variables."}
+    if STARTUP_ERROR:
+        return {"ok": False, "error": STARTUP_ERROR}
     
-    if config.webhook_url:
+    if not config:
+        return {"error": "Config not loaded."}
+    
+    try:
         bot = Bot(token=config.bot_token, parse_mode=ParseMode.HTML)
-        webhook_path = f"{config.webhook_url}/api/webhook"
+        # Normalize webhook URL (remove trailing slash)
+        base_url = config.webhook_url.rstrip("/")
+        webhook_path = f"{base_url}/api/webhook"
+        
         await bot.set_webhook(url=webhook_path)
-        return {"message": f"Webhook set to {webhook_path}"}
-    return {"message": "TGMarket Bot is running! Set WEBHOOK_URL in env to activate."}
+        return {"message": f"Webhook successfully set to {webhook_path}"}
+    except Exception as e:
+        return {"ok": False, "error": f"Failed to set webhook: {str(e)}"}
 
 @app.post("/api/webhook")
 async def webhook(request: Request):
+    if STARTUP_ERROR:
+        return {"error": "Startup error, cannot process webhook"}
+    
     if not config:
         return {"error": "Config not initialized"}
         
-    bot = Bot(token=config.bot_token, parse_mode=ParseMode.HTML)
-    dp = Dispatcher(storage=MemoryStorage())
-    
-    if common:
-        dp.include_router(common.router)
-    if creation:
-        dp.include_router(creation.router)
-
     try:
+        bot = Bot(token=config.bot_token, parse_mode=ParseMode.HTML)
+        dp = Dispatcher(storage=MemoryStorage())
+        
+        if common:
+            dp.include_router(common.router)
+        if creation:
+            dp.include_router(creation.router)
+
         data = await request.json()
         update = types.Update.model_validate(data, context={"bot": bot})
         await dp.feed_update(bot, update)
@@ -62,4 +70,5 @@ async def webhook(request: Request):
         return {"ok": False, "error": str(e)}
         
     return {"ok": True}
+
 

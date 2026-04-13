@@ -11,6 +11,7 @@ from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.client.default import DefaultBotProperties
 
 # Try importing everything and catch all errors
 try:
@@ -35,7 +36,10 @@ async def root():
         return {"error": "Config not loaded."}
     
     try:
-        bot = Bot(token=config.bot_token, parse_mode=ParseMode.HTML)
+        bot = Bot(
+            token=config.bot_token, 
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
         # Normalize webhook URL (remove trailing slash)
         base_url = config.webhook_url.rstrip("/")
         webhook_path = f"{base_url}/api/webhook"
@@ -54,7 +58,10 @@ async def webhook(request: Request):
         return {"error": "Config not initialized"}
         
     try:
-        bot = Bot(token=config.bot_token, parse_mode=ParseMode.HTML)
+        bot = Bot(
+            token=config.bot_token, 
+            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+        )
         dp = Dispatcher(storage=MemoryStorage())
         
         if common:

@@ -6,6 +6,9 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_key: str
     admin_ids: List[int] = []
+    webhook_url: str = ""
+    webhook_secret: str = ""
+
 
 
     model_config = SettingsConfigDict(

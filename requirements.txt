@@ -3,5 +3,8 @@ python-dotenv
 pydantic-settings
 supabase
 aiohttp
+fastapi
+uvicorn
+
 
 

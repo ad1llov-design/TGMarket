@@ -12,12 +12,15 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.client.default import DefaultBotProperties
+from database.storage import SupabaseStorage
 
 # Try importing everything and catch all errors
 try:
     from config import config
     from handlers import common, creation
     STARTUP_ERROR = None
+    # Initialize storage
+    storage = SupabaseStorage()
 except Exception as e:
     import traceback
     STARTUP_ERROR = f"Startup Error: {str(e)}\n{traceback.format_exc()}"
@@ -62,7 +65,7 @@ async def webhook(request: Request):
             token=config.bot_token, 
             default=DefaultBotProperties(parse_mode=ParseMode.HTML)
         )
-        dp = Dispatcher(storage=MemoryStorage())
+        dp = Dispatcher(storage=storage)
         
         if common:
             dp.include_router(common.router)

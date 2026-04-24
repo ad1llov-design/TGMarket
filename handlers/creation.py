@@ -63,16 +63,12 @@ async def handle_title(message: types.Message, state: FSMContext):
 
 @router.message(AdCreation.photos, F.photo)
 async def handle_photos(message: types.Message, state: FSMContext):
-    data = await state.get_data()
-    photos = data.get("photos", [])
-    photos.append(message.photo[-1].file_id)
-    await state.update_data(photos=photos)
+    # Use the custom atomic append_photo method to avoid race conditions
+    await state.storage.append_photo(state.key, message.photo[-1].file_id)
     
-    if len(photos) >= 10:
-        await message.answer("Максимальное количество фото (10) загружено. Переходим к описанию.")
-        await ask_description(message, state)
-    else:
-        await message.answer(f"Фото получено ({len(photos)}/10). Жду еще или нажмите 'Готово'.")
+    # We can't rely on getting accurate count here because of race conditions, 
+    # but we can at least confirm receipt.
+    await message.answer("Фото получено! Если закончили, нажмите кнопку 'Готово'.")
 
 @router.callback_query(AdCreation.photos, F.data == "photos_done")
 async def photos_done_handler(callback: types.CallbackQuery, state: FSMContext):
@@ -89,18 +85,27 @@ async def ask_description(message: types.Message, state: FSMContext):
 
 @router.message(AdCreation.description)
 async def handle_description(message: types.Message, state: FSMContext):
+    if not message.text:
+        await message.answer("Пожалуйста, введите текстовое описание.")
+        return
     await state.update_data(description=message.text)
-    await message.answer("Введите цену:")
+    await message.answer("Теперь введите цену (например, 5000 сом):")
     await state.set_state(AdCreation.price)
 
 @router.message(AdCreation.price)
 async def handle_price(message: types.Message, state: FSMContext):
+    if not message.text:
+        await message.answer("Пожалуйста, введите цену текстом.")
+        return
     await state.update_data(price=message.text)
-    await message.answer("Введите ваш номер телефона:")
+    await message.answer("Введите ваш номер телефона для связи:")
     await state.set_state(AdCreation.contact)
 
 @router.message(AdCreation.contact)
 async def handle_contact(message: types.Message, state: FSMContext):
+    if not message.text:
+        await message.answer("Пожалуйста, введите контактные данные.")
+        return
     await state.update_data(contact=message.text)
     data = await state.get_data()
     

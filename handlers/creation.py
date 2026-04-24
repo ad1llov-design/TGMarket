@@ -7,58 +7,47 @@ from states.creation import AdCreation
 
 router = Router()
 
-REGIONS = {
-    "osh": "📍 Ош",
-    "bishkek": "📍 Бишкек",
-    "jalalabad": "📍 Джалал-Абад"
-}
-
-CATEGORIES = {
-    "phones": "📱 Телефоны",
-    "cars": "🚗 Автомобили",
-    "realty": "🏠 Недвижимость",
-    "other": "📦 Разное"
-}
 
 @router.callback_query(F.data == "create_ad")
 async def start_ad_creation(callback: types.CallbackQuery, state: FSMContext):
+    from database.client import supabase
+    try:
+        response = supabase.table('channels').select('*').execute()
+        channels = response.data
+    except Exception as e:
+        await callback.answer(f"Ошибка при получении каналов: {e}", show_alert=True)
+        return
+
+    if not channels:
+        await callback.answer("Каналы не найдены в базе данных.", show_alert=True)
+        return
+
     builder = InlineKeyboardBuilder()
-    for code, name in REGIONS.items():
-        builder.row(types.InlineKeyboardButton(text=name, callback_data=f"reg_{code}"))
+    for ch in channels:
+        # Use channel_id as part of callback_data
+        builder.row(types.InlineKeyboardButton(
+            text=f"📢 {ch.get('name', 'Канал')}", 
+            callback_data=f"chan_{ch['channel_id']}")
+        )
     
     await callback.message.edit_text(
-        "Выберите ваш регион:",
+        "Выберите канал для размещения:",
         reply_markup=builder.as_markup()
     )
-    await state.set_state(AdCreation.region)
+    await state.set_state(AdCreation.category) # Using category state for channel selection
     await callback.answer()
 
-@router.callback_query(AdCreation.region, F.data.startswith("reg_"))
-async def select_region(callback: types.CallbackQuery, state: FSMContext):
-    reg_code = callback.data.split("_")[1]
-    await state.update_data(region=reg_code)
-    
-    builder = InlineKeyboardBuilder()
-    for code, name in CATEGORIES.items():
-        builder.row(types.InlineKeyboardButton(text=name, callback_data=f"cat_{code}"))
-    
-    await callback.message.edit_text(
-        f"Регион: {REGIONS[reg_code]}\nТеперь выберите категорию:",
-        reply_markup=builder.as_markup()
-    )
-    await state.set_state(AdCreation.category)
-    await callback.answer()
-
-@router.callback_query(AdCreation.category, F.data.startswith("cat_"))
-async def select_category(callback: types.CallbackQuery, state: FSMContext):
-    cat_code = callback.data.split("_")[1]
-    await state.update_data(category=cat_code)
+@router.callback_query(AdCreation.category, F.data.startswith("chan_"))
+async def select_channel(callback: types.CallbackQuery, state: FSMContext):
+    channel_id = callback.data.split("_")[1]
+    await state.update_data(channel_id=channel_id)
     
     await callback.message.edit_text(
         "Введите название товара (Заголовок):"
     )
     await state.set_state(AdCreation.title)
     await callback.answer()
+
 
 @router.message(AdCreation.title)
 async def handle_title(message: types.Message, state: FSMContext):
@@ -138,8 +127,6 @@ async def handle_contact(message: types.Message, state: FSMContext):
 async def format_post(data: dict, seller_link: str, bot_username: str) -> str:
     return (
         f"🔥 <b>{data['title'].upper()}</b>\n\n"
-        f"📍 Регион: {REGIONS[data['region']]}\n"
-        f"📂 Категория: {CATEGORIES[data['category']]}\n\n"
         f"📝 <b>Описание:</b>\n{data['description']}\n\n"
         f"💰 <b>Цена:</b> {data['price']}\n\n"
         f"📞 <b>Контакты:</b> {data['contact']}\n"
@@ -151,19 +138,10 @@ async def format_post(data: dict, seller_link: str, bot_username: str) -> str:
 @router.callback_query(AdCreation.preview, F.data == "publish_ad")
 async def publish_ad_handler(callback: types.CallbackQuery, state: FSMContext, bot: Bot):
     data = await state.get_data()
+    channel_id = data.get('channel_id')
     
-    from database.client import supabase
-    
-    # Fetch channel from Supabase
-    try:
-        response = supabase.table('channels').select('channel_id').eq('category', data['category']).execute()
-        if response.data:
-            channel_id = response.data[0]['channel_id']
-        else:
-            await callback.answer("Ошибка: Канал для этой категории не найден в базе данных.", show_alert=True)
-            return
-    except Exception as e:
-        await callback.answer(f"Ошибка БД: {str(e)}", show_alert=True)
+    if not channel_id:
+        await callback.answer("Ошибка: Канал не выбран.", show_alert=True)
         return
         
     user = callback.from_user
@@ -194,8 +172,7 @@ async def publish_ad_handler(callback: types.CallbackQuery, state: FSMContext, b
         try:
             supabase.table('listings').insert({
                 "user_id": user.id,
-                "category": data['category'],
-                "region": data['region'],
+                "channel_id": channel_id,
                 "title": data['title'],
                 "description": data['description'],
                 "price": data['price'],

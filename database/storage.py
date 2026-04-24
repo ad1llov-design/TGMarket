@@ -7,12 +7,10 @@ class SupabaseStorage(BaseStorage):
         key_str = f"{key.bot_id}:{key.chat_id}:{key.user_id}"
         state_str = state.state if hasattr(state, 'state') else str(state) if state else None
         
-        # Check if exists to avoid overwriting data
+        # Try updating first
         try:
-            response = supabase.table("bot_fsm").select("key").eq("key", key_str).execute()
-            if response.data:
-                supabase.table("bot_fsm").update({"state": state_str}).eq("key", key_str).execute()
-            else:
+            res = supabase.table("bot_fsm").update({"state": state_str}).eq("key", key_str).execute()
+            if not res.data:
                 supabase.table("bot_fsm").insert({"key": key_str, "state": state_str, "data": {}}).execute()
         except Exception as e:
             print(f"Supabase set_state error: {e}")
@@ -27,10 +25,8 @@ class SupabaseStorage(BaseStorage):
     async def set_data(self, key: StorageKey, data: Dict[str, Any]) -> None:
         key_str = f"{key.bot_id}:{key.chat_id}:{key.user_id}"
         try:
-            response = supabase.table("bot_fsm").select("key").eq("key", key_str).execute()
-            if response.data:
-                supabase.table("bot_fsm").update({"data": data}).eq("key", key_str).execute()
-            else:
+            res = supabase.table("bot_fsm").update({"data": data}).eq("key", key_str).execute()
+            if not res.data:
                 supabase.table("bot_fsm").insert({"key": key_str, "state": None, "data": data}).execute()
         except Exception as e:
             print(f"Supabase set_data error: {e}")

@@ -19,8 +19,13 @@ try:
     from config import config
     from handlers import common, creation
     STARTUP_ERROR = None
-    # Initialize storage
+    # Initialize storage and dispatcher once
     storage = SupabaseStorage()
+    dp = Dispatcher(storage=storage)
+    if common:
+        dp.include_router(common.router)
+    if creation:
+        dp.include_router(creation.router)
 except Exception as e:
     import traceback
     STARTUP_ERROR = f"Startup Error: {str(e)}\n{traceback.format_exc()}"
@@ -65,12 +70,6 @@ async def webhook(request: Request):
             token=config.bot_token, 
             default=DefaultBotProperties(parse_mode=ParseMode.HTML)
         )
-        dp = Dispatcher(storage=storage)
-        
-        if common:
-            dp.include_router(common.router)
-        if creation:
-            dp.include_router(creation.router)
 
         data = await request.json()
         update = types.Update.model_validate(data, context={"bot": bot})

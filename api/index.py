@@ -36,26 +36,28 @@ except Exception as e:
 app = FastAPI()
 
 @app.get("/")
-async def root():
+async def root(request: Request):
     if STARTUP_ERROR:
         return {"ok": False, "error": STARTUP_ERROR}
     
     if not config:
         return {"error": "Config not loaded."}
     
-    try:
-        bot = Bot(
-            token=config.bot_token, 
-            default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-        )
-        # Normalize webhook URL (remove trailing slash)
-        base_url = config.webhook_url.rstrip("/")
-        webhook_path = f"{base_url}/api/webhook"
-        
-        await bot.set_webhook(url=webhook_path)
-        return {"message": f"Webhook successfully set to {webhook_path}"}
-    except Exception as e:
-        return {"ok": False, "error": f"Failed to set webhook: {str(e)}"}
+    # Only set webhook if explicitly requested via query param to avoid rate limits
+    if request.query_params.get("set_webhook") == "true":
+        try:
+            bot = Bot(
+                token=config.bot_token, 
+                default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+            )
+            base_url = config.webhook_url.rstrip("/")
+            webhook_path = f"{base_url}/api/webhook"
+            await bot.set_webhook(url=webhook_path)
+            return {"message": f"Webhook successfully set to {webhook_path}"}
+        except Exception as e:
+            return {"ok": False, "error": f"Failed to set webhook: {str(e)}"}
+    
+    return {"message": "Bot is running. Visit /?set_webhook=true to update webhook."}
 
 @app.post("/api/webhook")
 async def webhook(request: Request):

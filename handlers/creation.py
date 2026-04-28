@@ -158,13 +158,22 @@ async def publish_ad_handler(callback: types.CallbackQuery, state: FSMContext, b
     post_text = await format_post(data, seller_link, (await bot.get_me()).username)
 
     try:
-        if len(data['photos']) > 1:
+        # Clean channel_id (sometimes people put spaces)
+        channel_id = str(channel_id).strip()
+        
+        # Ensure it starts with @ if it's a username and not an ID
+        if not channel_id.startswith('@') and not channel_id.startswith('-'):
+            channel_id = f"@{channel_id}"
+
+        if len(data.get('photos', [])) > 1:
             media = [types.InputMediaPhoto(media=data['photos'][0], caption=post_text, parse_mode="HTML")]
             for photo_id in data['photos'][1:]:
                 media.append(types.InputMediaPhoto(media=photo_id))
             await bot.send_media_group(chat_id=channel_id, media=media)
-        else:
+        elif data.get('photos'):
             await bot.send_photo(chat_id=channel_id, photo=data['photos'][0], caption=post_text, parse_mode="HTML")
+        else:
+            await bot.send_message(chat_id=channel_id, text=post_text, parse_mode="HTML")
 
         await callback.message.edit_caption(
             caption=f"{callback.message.caption}\n\n✅ <b>Опубликовано!</b>",
@@ -174,6 +183,7 @@ async def publish_ad_handler(callback: types.CallbackQuery, state: FSMContext, b
         await callback.answer("Объявление успешно опубликовано!", show_alert=True)
         
         # Save to DB
+        from database.client import supabase
         try:
             supabase.table('listings').insert({
                 "user_id": user.id,
@@ -182,16 +192,18 @@ async def publish_ad_handler(callback: types.CallbackQuery, state: FSMContext, b
                 "description": data['description'],
                 "price": data['price'],
                 "contact": data['contact'],
-                "photos": data['photos']
+                "photos": data.get('photos', [])
             }).execute()
         except Exception as e:
-            print(f"Failed to save listing to DB: {e}")
+            sys.stderr.write(f"ERROR: Failed to save listing to DB: {e}\n")
             
         await state.clear()
-
         
     except Exception as e:
-        await callback.answer(f"Ошибка при публикации: {str(e)}", show_alert=True)
+        error_msg = str(e)
+        detailed_error = f"Ошибка при публикации в {channel_id}: {error_msg}\n\nПожалуйста, убедитесь, что бот является АДМИНИСТРАТОРОМ этого канала."
+        await callback.answer(detailed_error, show_alert=True)
+        sys.stderr.write(f"ERROR: Publication failed for {channel_id}: {e}\n")
 
 @router.callback_query(F.data == "cancel_ad")
 async def cancel_ad_handler(callback: types.CallbackQuery, state: FSMContext):

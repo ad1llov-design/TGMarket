@@ -34,7 +34,8 @@ async def start_ad_creation(callback: types.CallbackQuery, state: FSMContext):
         "Выберите канал для размещения:",
         reply_markup=builder.as_markup()
     )
-    await state.set_state(AdCreation.category) # Using category state for channel selection
+    await state.set_state(AdCreation.category)
+    await state.set_data({"photos": []}) # Clear old photos and data
     await callback.answer()
 
 @router.callback_query(AdCreation.category, F.data.startswith("chan_"))
@@ -165,13 +166,16 @@ async def publish_ad_handler(callback: types.CallbackQuery, state: FSMContext, b
         if not channel_id.startswith('@') and not channel_id.startswith('-'):
             channel_id = f"@{channel_id}"
 
-        if len(data.get('photos', [])) > 1:
-            media = [types.InputMediaPhoto(media=data['photos'][0], caption=post_text, parse_mode="HTML")]
-            for photo_id in data['photos'][1:]:
+        # Limit to 10 photos
+        all_photos = data.get('photos', [])[:10]
+
+        if len(all_photos) > 1:
+            media = [types.InputMediaPhoto(media=all_photos[0], caption=post_text, parse_mode="HTML")]
+            for photo_id in all_photos[1:]:
                 media.append(types.InputMediaPhoto(media=photo_id))
             await bot.send_media_group(chat_id=channel_id, media=media)
-        elif data.get('photos'):
-            await bot.send_photo(chat_id=channel_id, photo=data['photos'][0], caption=post_text, parse_mode="HTML")
+        elif all_photos:
+            await bot.send_photo(chat_id=channel_id, photo=all_photos[0], caption=post_text, parse_mode="HTML")
         else:
             await bot.send_message(chat_id=channel_id, text=post_text, parse_mode="HTML")
 

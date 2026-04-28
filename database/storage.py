@@ -59,14 +59,14 @@ class SupabaseStorage(BaseStorage):
             sys.stderr.write(f"ERROR: Supabase get_data error: {e}\n")
         return {}
 
-    async def append_photo(self, key: StorageKey, photo_id: str) -> None:
+    async def append_media(self, key: StorageKey, media_id: str) -> None:
         key_str = self._get_key(key)
         try:
             # Call the custom postgres function via RPC
-            supabase.rpc("append_fsm_photo", {"user_key": key_str, "photo_id": photo_id}).execute()
-            sys.stderr.write(f"DEBUG: Appended photo {photo_id} for {key_str}\n")
+            supabase.rpc("append_fsm_media", {"user_key": key_str, "media_id": media_id}).execute()
+            sys.stderr.write(f"DEBUG: Appended media {media_id} for {key_str}\n")
         except Exception as e:
-            sys.stderr.write(f"ERROR: Supabase append_photo error: {e}\n")
+            sys.stderr.write(f"ERROR: Supabase append_media error: {e}\n")
 
     async def close(self) -> None:
         pass

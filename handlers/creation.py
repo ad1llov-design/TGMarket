@@ -35,7 +35,7 @@ async def start_ad_creation(callback: types.CallbackQuery, state: FSMContext):
         reply_markup=builder.as_markup()
     )
     await state.set_state(AdCreation.category)
-    await state.set_data({"photos": []}) # Clear old photos and data
+    await state.set_data({"media": []}) # Clear old media and data
     await callback.answer()
 
 @router.callback_query(AdCreation.category, F.data.startswith("chan_"))
@@ -54,28 +54,34 @@ async def select_channel(callback: types.CallbackQuery, state: FSMContext):
 async def handle_title(message: types.Message, state: FSMContext):
     await state.update_data(title=message.text)
     await message.answer(
-        "Теперь отправьте до 10 фотографий товара.\n"
+        "Теперь отправьте до 10 ФОТО или ВИДЕО товара.\n"
         "Когда закончите, нажмите кнопку 'Готово'.",
         reply_markup=InlineKeyboardBuilder().row(
-            types.InlineKeyboardButton(text="✅ Готово (загрузил)", callback_data="photos_done")
+            types.InlineKeyboardButton(text="✅ Готово (загрузил)", callback_data="media_done")
         ).as_markup()
     )
-    await state.set_state(AdCreation.photos)
+    await state.set_state(AdCreation.media)
 
-@router.message(AdCreation.photos, F.photo)
-async def handle_photos(message: types.Message, state: FSMContext):
-    # Use the custom atomic append_photo method to avoid race conditions
-    await state.storage.append_photo(state.key, message.photo[-1].file_id)
+@router.message(AdCreation.media, (F.photo | F.video))
+async def handle_media(message: types.Message, state: FSMContext):
+    # Get the file_id depending on the type
+    if message.photo:
+        file_id = message.photo[-1].file_id
+        media_type = "photo"
+    else:
+        file_id = message.video.file_id
+        media_type = "video"
+
+    # Use the custom atomic append_media method
+    await state.storage.append_media(state.key, f"{media_type}:{file_id}")
     
-    # We can't rely on getting accurate count here because of race conditions, 
-    # but we can at least confirm receipt.
-    await message.answer("Фото получено! Если закончили, нажмите кнопку 'Готово'.")
+    await message.answer(f"{'Фото' if media_type == 'photo' else 'Видео'} получено! Если закончили, нажмите кнопку 'Готово'.")
 
-@router.callback_query(AdCreation.photos, F.data == "photos_done")
-async def photos_done_handler(callback: types.CallbackQuery, state: FSMContext):
+@router.callback_query(AdCreation.media, F.data == "media_done")
+async def media_done_handler(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    if not data.get("photos"):
-        await callback.answer("Нужно отправить хотя бы одно фото!", show_alert=True)
+    if not data.get("media"):
+        await callback.answer("Нужно отправить хотя бы одно фото или видео!", show_alert=True)
         return
     await ask_description(callback.message, state)
     await callback.answer()
@@ -119,15 +125,30 @@ async def handle_contact(message: types.Message, state: FSMContext):
     preview_text = await format_post(data, seller_link, (await message.bot.get_me()).username)
     
     await message.answer("Вот как будет выглядеть ваше объявление:")
-    await message.answer_photo(
-        photo=data['photos'][0],
-        caption=preview_text,
-        reply_markup=InlineKeyboardBuilder().row(
-            types.InlineKeyboardButton(text="🚀 Опубликовать", callback_data="publish_ad"),
-            types.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ad")
-        ).as_markup(),
-        parse_mode="HTML"
-    )
+    
+    first_media = data['media'][0]
+    m_type, m_id = first_media.split(":", 1)
+
+    if m_type == "photo":
+        await message.answer_photo(
+            photo=m_id,
+            caption=preview_text,
+            reply_markup=InlineKeyboardBuilder().row(
+                types.InlineKeyboardButton(text="🚀 Опубликовать", callback_data="publish_ad"),
+                types.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ad")
+            ).as_markup(),
+            parse_mode="HTML"
+        )
+    else:
+        await message.answer_video(
+            video=m_id,
+            caption=preview_text,
+            reply_markup=InlineKeyboardBuilder().row(
+                types.InlineKeyboardButton(text="🚀 Опубликовать", callback_data="publish_ad"),
+                types.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ad")
+            ).as_markup(),
+            parse_mode="HTML"
+        )
     await state.set_state(AdCreation.preview)
 
 async def format_post(data: dict, seller_link: str, bot_username: str) -> str:
@@ -166,16 +187,26 @@ async def publish_ad_handler(callback: types.CallbackQuery, state: FSMContext, b
         if not channel_id.startswith('@') and not channel_id.startswith('-'):
             channel_id = f"@{channel_id}"
 
-        # Limit to 10 photos
-        all_photos = data.get('photos', [])[:10]
+        # Limit to 10 media items
+        all_media = data.get('media', [])[:10]
 
-        if len(all_photos) > 1:
-            media = [types.InputMediaPhoto(media=all_photos[0], caption=post_text, parse_mode="HTML")]
-            for photo_id in all_photos[1:]:
-                media.append(types.InputMediaPhoto(media=photo_id))
-            await bot.send_media_group(chat_id=channel_id, media=media)
-        elif all_photos:
-            await bot.send_photo(chat_id=channel_id, photo=all_photos[0], caption=post_text, parse_mode="HTML")
+        if len(all_media) > 1:
+            media_group = []
+            for i, item in enumerate(all_media):
+                m_type, m_id = item.split(":", 1)
+                caption = post_text if i == 0 else None
+                if m_type == "photo":
+                    media_group.append(types.InputMediaPhoto(media=m_id, caption=caption, parse_mode="HTML"))
+                else:
+                    media_group.append(types.InputMediaVideo(media=m_id, caption=caption, parse_mode="HTML"))
+            
+            await bot.send_media_group(chat_id=channel_id, media=media_group)
+        elif all_media:
+            m_type, m_id = all_media[0].split(":", 1)
+            if m_type == "photo":
+                await bot.send_photo(chat_id=channel_id, photo=m_id, caption=post_text, parse_mode="HTML")
+            else:
+                await bot.send_video(chat_id=channel_id, video=m_id, caption=post_text, parse_mode="HTML")
         else:
             await bot.send_message(chat_id=channel_id, text=post_text, parse_mode="HTML")
 
@@ -196,7 +227,7 @@ async def publish_ad_handler(callback: types.CallbackQuery, state: FSMContext, b
                 "description": data['description'],
                 "price": data['price'],
                 "contact": data['contact'],
-                "photos": data.get('photos', [])
+                "media": data.get('media', [])
             }).execute()
         except Exception as e:
             sys.stderr.write(f"ERROR: Failed to save listing to DB: {e}\n")

@@ -39,7 +39,7 @@ async def start_ad_creation(callback: types.CallbackQuery, state: FSMContext):
 
 @router.callback_query(AdCreation.category, F.data.startswith("chan_"))
 async def select_channel(callback: types.CallbackQuery, state: FSMContext):
-    channel_id = callback.data.split("_")[1]
+    channel_id = callback.data.split("_", 1)[1]
     await state.update_data(channel_id=channel_id)
     
     await callback.message.edit_text(

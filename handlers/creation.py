@@ -11,6 +11,28 @@ router = Router()
 @router.callback_query(F.data == "create_ad")
 async def start_ad_creation(callback: types.CallbackQuery, state: FSMContext):
     from database.client import supabase
+    from datetime import datetime, timedelta
+    import pytz
+    
+    # --- Check Cooldown (4 hours) ---
+    try:
+        user_id = callback.from_user.id
+        # Get the latest listing for this user
+        res = supabase.table('listings').select('created_at').eq('user_id', user_id).order('created_at', desc=True).limit(1).execute()
+        
+        if res.data:
+            last_post_time = datetime.fromisoformat(res.data[0]['created_at'].replace('Z', '+00:00'))
+            now = datetime.now(pytz.UTC)
+            diff = now - last_post_time
+            
+            if diff < timedelta(hours=4):
+                remaining = timedelta(hours=4) - diff
+                minutes = int(remaining.total_seconds() // 60)
+                await callback.answer(f"⏳ Вы можете публиковать только раз в 4 часа.\nПопробуйте через {minutes} мин.", show_alert=True)
+                return
+    except Exception as e:
+        sys.stderr.write(f"Cooldown check error: {e}\n")
+
     try:
         response = supabase.table('channels').select('*').execute()
         channels = response.data
@@ -24,7 +46,6 @@ async def start_ad_creation(callback: types.CallbackQuery, state: FSMContext):
 
     builder = InlineKeyboardBuilder()
     for ch in channels:
-        # Use channel_id as part of callback_data
         builder.row(types.InlineKeyboardButton(
             text=f"📢 {ch.get('name', 'Канал')}", 
             callback_data=f"chan_{ch['channel_id']}")
@@ -95,6 +116,11 @@ async def handle_description(message: types.Message, state: FSMContext):
     if not message.text:
         await message.answer("Пожалуйста, введите текстовое описание.")
         return
+    
+    if len(message.text) > 400:
+        await message.answer(f"❌ Описание слишком длинное ({len(message.text)}/400 симв.).\nПожалуйста, сократите текст.")
+        return
+
     await state.update_data(description=message.text)
     await message.answer("Теперь введите цену (например, 5000 сом):")
     await state.set_state(AdCreation.price)
@@ -124,25 +150,39 @@ async def handle_contact(message: types.Message, state: FSMContext):
 
     preview_text = await format_post(data, seller_link, (await message.bot.get_me()).username)
     
-    await message.answer("Вот как будет выглядеть ваше объявление:")
-    
-    first_media = data['media'][0]
-    m_type, m_id = first_media.split(":", 1)
+    media_list = data.get('media', [])
+    media_count = len(media_list)
+    info_text = f"\n\n📸 Загружено медиа: {media_count}" if media_count > 0 else ""
 
-    if m_type == "photo":
-        await message.answer_photo(
-            photo=m_id,
-            caption=preview_text,
-            reply_markup=InlineKeyboardBuilder().row(
-                types.InlineKeyboardButton(text="🚀 Опубликовать", callback_data="publish_ad"),
-                types.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ad")
-            ).as_markup(),
-            parse_mode="HTML"
-        )
+    await message.answer(f"Вот как будет выглядеть ваше объявление:{info_text}")
+    
+    if media_count > 0:
+        first_media = media_list[0]
+        m_type, m_id = first_media.split(":", 1)
+
+        if m_type == "photo":
+            await message.answer_photo(
+                photo=m_id,
+                caption=preview_text,
+                reply_markup=InlineKeyboardBuilder().row(
+                    types.InlineKeyboardButton(text="🚀 Опубликовать", callback_data="publish_ad"),
+                    types.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ad")
+                ).as_markup(),
+                parse_mode="HTML"
+            )
+        else:
+            await message.answer_video(
+                video=m_id,
+                caption=preview_text,
+                reply_markup=InlineKeyboardBuilder().row(
+                    types.InlineKeyboardButton(text="🚀 Опубликовать", callback_data="publish_ad"),
+                    types.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ad")
+                ).as_markup(),
+                parse_mode="HTML"
+            )
     else:
-        await message.answer_video(
-            video=m_id,
-            caption=preview_text,
+        await message.answer(
+            text=preview_text,
             reply_markup=InlineKeyboardBuilder().row(
                 types.InlineKeyboardButton(text="🚀 Опубликовать", callback_data="publish_ad"),
                 types.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_ad")
